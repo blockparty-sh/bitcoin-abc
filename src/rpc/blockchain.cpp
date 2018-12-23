@@ -12,6 +12,7 @@
 #include "coins.h"
 #include "config.h"
 #include "consensus/validation.h"
+#include "core_io.h"
 #include "hash.h"
 #include "policy/policy.h"
 #include "primitives/transaction.h"
@@ -486,6 +487,127 @@ UniValue getrawmempool(const Config &config, const JSONRPCRequest &request) {
     }
 
     return mempoolToJSON(fVerbose);
+}
+
+UniValue getrawmempooltxs(const Config &config, const JSONRPCRequest &request) {
+    if (request.fHelp || request.params.size() > 1) {
+        throw std::runtime_error(
+            "getrawmempooltxs ( verbose )\n"
+
+            "\nReturns all transactions in memory pool as a json array of "
+            "transaction data.\n"
+
+            "\nArguments:\n"
+            "1. verbose (boolean, optional, default=false) True for a json "
+            "object, false for array of transaction data\n"
+
+            "\nResult: (for verbose = false):\n"
+            "[                     (json array of string)\n"
+            "  \"data\"                (string) The serialized hex-encoded "
+            " data\n"
+            "  ,...\n"
+            "]\n"
+            "\nResult: (for verbose = true):\n"
+
+            "[                         (json array of objects)\n"
+            "  {\n"
+            "    \"hex\" : \"data\",       (string) The serialized, hex-encoded "
+            "data for 'txid'\n"
+            "    \"txid\" : \"id\",        (string) The transaction id (same as "
+            "provided)\n"
+            "    \"hash\" : \"id\",        (string) The transaction hash "
+            "(differs from txid for witness transactions)\n"
+            "    \"size\" : n,             (numeric) The serialized transaction "
+            "size\n"
+            "    \"version\" : n,          (numeric) The version\n"
+            "    \"locktime\" : ttt,       (numeric) The lock time\n"
+            "    \"vin\" : [               (array of json objects)\n"
+            "       {\n"
+            "         \"txid\": \"id\",    (string) The transaction id\n"
+            "         \"vout\": n,         (numeric) \n"
+            "         \"scriptSig\": {     (json object) The script\n"
+            "           \"asm\": \"asm\",  (string) asm\n"
+            "           \"hex\": \"hex\"   (string) hex\n"
+            "         },\n"
+            "         \"sequence\": n      (numeric) The script sequence number\n"
+            "       }\n"
+            "       ,...\n"
+            "    ],\n"
+            "    \"vout\" : [              (array of json objects)\n"
+            "       {\n"
+            "         \"value\" : x.xxx,            (numeric) The value in " +
+            CURRENCY_UNIT +
+            "\n"
+            "         \"n\" : n,                    (numeric) index\n"
+            "         \"scriptPubKey\" : {          (json object)\n"
+            "           \"asm\" : \"asm\",          (string) the asm\n"
+            "           \"hex\" : \"hex\",          (string) the hex\n"
+            "           \"reqSigs\" : n,            (numeric) The required sigs\n"
+            "           \"type\" : \"pubkeyhash\",  (string) The type, eg "
+            "'pubkeyhash'\n"
+            "           \"addresses\" : [           (json array of string)\n"
+            "             \"address\"        (string) bitcoin address\n"
+            "             ,...\n"
+            "           ]\n"
+            "         }\n"
+            "       }\n"
+            "       ,...\n"
+            "    ],\n"
+            "    \"blockhash\" : \"hash\",   (string) the block hash\n"
+            "    \"confirmations\" : n,      (numeric) The confirmations\n"
+            "    \"time\" : ttt,             (numeric) The transaction time in "
+            "seconds since epoch (Jan 1 1970 GMT)\n"
+            "    \"blocktime\" : ttt         (numeric) The block time in seconds "
+            "since epoch (Jan 1 1970 GMT)\n"
+            "  }\n"
+            "]\n"
+
+           "\nExamples:\n" +
+            HelpExampleCli("getrawmempooltxs", "") +
+            HelpExampleCli("getrawmempooltxs", "true") +
+            HelpExampleRpc("getrawmempooltxs", "true"));
+    }
+
+    // Accept either a bool (true) or a num (>=1) to indicate verbose output.
+    bool fVerbose = false;
+    if (request.params.size() > 0) {
+        if (request.params[0].isNum()) {
+            if (request.params[0].get_int() != 0) {
+                fVerbose = true;
+            }
+        } else if (request.params[0].isBool()) {
+            if (request.params[0].isTrue()) {
+                fVerbose = true;
+            }
+        } else {
+            throw JSONRPCError(
+                RPC_TYPE_ERROR,
+                "Invalid type provided. Verbose parameter must be a boolean.");
+        }
+    }
+
+    UniValue o(UniValue::VARR);
+    if (!fVerbose) {
+        for (const CTxMemPoolEntry &e : mempool.mapTx) {
+            std::string strHex = EncodeHexTx(e.GetTx(), RPCSerializationFlags());
+            o.push_back(strHex);
+        }
+
+        return o;
+    }
+
+    uint256 hashBlock;
+    for (const CTxMemPoolEntry &e : mempool.mapTx) {
+        std::string strHex = EncodeHexTx(e.GetTx(), RPCSerializationFlags());
+
+        UniValue utx(UniValue::VOBJ);
+        utx.pushKV("hex", strHex);
+        TxToJSON(config, e.GetTx(), hashBlock, utx);
+
+        o.push_back(utx);
+    }
+
+    return o;
 }
 
 UniValue getmempoolancestors(const Config &config,
@@ -1820,6 +1942,7 @@ static const ContextFreeRPCCommand commands[] = {
     { "blockchain",         "getmempoolentry",        getmempoolentry,        {"txid"} },
     { "blockchain",         "getmempoolinfo",         getmempoolinfo,         {} },
     { "blockchain",         "getrawmempool",          getrawmempool,          {"verbose"} },
+    { "blockchain",         "getrawmempooltxs",       getrawmempooltxs,       {"verbose"} },
     { "blockchain",         "gettxout",               gettxout,               {"txid","n","include_mempool"} },
     { "blockchain",         "gettxoutsetinfo",        gettxoutsetinfo,        {} },
     { "blockchain",         "pruneblockchain",        pruneblockchain,        {"height"} },
